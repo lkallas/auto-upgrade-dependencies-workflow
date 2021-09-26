@@ -1,0 +1,130 @@
+name: Create dependency upgrade PR-s
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      dependencies-to-update:
+        description: 'JSON array string with dependencies to update'
+        required: true
+        default: '["rimraf", "typescript", "node-fetch"]'
+      repositories-to-update:
+        description: 'JSON array string with repositories to update'
+        required: true
+        default: '["lkallas/action-target-one", "lkallas/action-target-two"]'
+      branch-name:
+        description: 'Branch from which the PR is made'
+        required: false
+        default: 'auto_upgrade_dependencies'
+      labels:
+        description: 'Comma separated PR labels'
+        required: false
+        default: 'dependencies, actions, bot'
+
+jobs:
+  upgrade-dependencies:
+    env:
+      GITHUB_USER: ${{ github.actor }}
+      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    strategy:
+      matrix:
+        repositories: ${{ fromJson(github.event.inputs.repositories-to-update) }}
+      fail-fast: false
+    steps:
+      - id: checkout
+        name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ matrix.repositories }}
+          token: ${{ secrets.GH_TOKEN }}
+
+      - id: config
+        name: NPM token and git config
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+          DEFAULT_BRANCH=$(git remote show origin | awk '/HEAD branch/ {print $NF}')
+          echo "default_branch=$DEFAULT_BRANCH" >> $GITHUB_ENV
+          echo "default_branch_ref=refs/heads/$DEFAULT_BRANCH" >> $GITHUB_ENV
+
+      - id: branch-check
+        name: Check upstream for branch existence
+        run: |
+          MATCH=$(curl -s -u ${{ github.actor }}:${{ secrets.GH_TOKEN }} -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/${{ matrix.repositories }}/branches | jq -c '.[] | select(.name == "${{ github.event.inputs.branch-name }}")')
+          [[ ! -z "$MATCH" ]] && echo "::set-output name=UPSTREAM_BRANCH_EXISTS::true" || echo "::set-output name=UPSTREAM_BRANCH_EXISTS::false"
+          [[ ! -z "$MATCH" ]] && echo "::warning::${{ github.event.inputs.branch-name }} branch already exists, skipping!" || echo "Branch ${{ github.event.inputs.branch-name }} does not exist, proceed..."
+
+      - id: package-json
+        name: Check package.json
+        if: steps.branch-check.outputs.UPSTREAM_BRANCH_EXISTS != 'true'
+        run: |
+          EXISTING_DEPENDENCIES=$(jq -r '[(.dependencies, .devDependencies) | with_entries(select([.key] | inside(${{ github.event.inputs.dependencies-to-update }}))) | keys ] | flatten | join(" ")' package.json) &&
+          (
+              if [[ ! -z "$EXISTING_DEPENDENCIES" ]]; then
+
+                  yarn_outdated_output=$(yarn outdated $EXISTING_DEPENDENCIES --json | jq -r 'select(.type=="table") | .data.body');
+
+                  if [[ -z "$yarn_outdated_output" ]]; then
+                      echo "::warning::yarn outdated returned empty result - everything up-to-date!"
+                  else
+                      dependencies='';
+                      for dependency_name in $EXISTING_DEPENDENCIES; do
+
+                          dependency_version_details=$(echo ${yarn_outdated_output} | jq -r '.[] | select(contains(["'$dependency_name'"]))');
+
+                          current_version=$(echo ${dependency_version_details} | jq -r .[1]);
+                          latest_version=$(echo ${dependency_version_details} | jq -r .[3]);
+
+
+                          if [ ! -z "$current_version" ]; then
+
+                              echo Current $dependency_name version: $current_version;
+                              echo Latest $dependency_name version: $latest_version;
+
+                              if [ $current_version != $latest_version ]; then
+                                  echo $dependency_name is outdated!;
+                                  dependencies+=" ${dependency_name}";
+                              fi
+
+                          else
+                              echo $dependency_name is up-to-date, skipping...;
+                          fi
+                      done
+                      echo "::set-output name=DEPENDENCIES::$dependencies"
+                      echo Preparing to upgrade $dependencies
+                  fi
+              else
+                  echo No matching dependencies found in package.json!;
+              fi
+          )
+
+      - id: branch-yarn
+        name: Checkout branch and yarn
+        if: steps.package-json.outputs.DEPENDENCIES != ''
+        run: |
+          git checkout -b ${{ github.event.inputs.branch-name }} &&
+          yarn add ${{ steps.package-json.outputs.DEPENDENCIES }} &&
+          rm .npmrc
+
+      - id: push
+        name: Commit, push upstream
+        if: steps.branch-check.outputs.UPSTREAM_BRANCH_EXISTS != 'true' && steps.package-json.outputs.DEPENDENCIES != ''
+        run: |
+          git add . && git commit -m "chore: (auto)upgrade ${{ steps.package-json.outputs.DEPENDENCIES }}" &&
+          CHANGES=$(git diff --name-only ${{ env.default_branch }} ${{ github.event.inputs.branch-name }} | wc -l)
+          [[ $CHANGES == 0 ]] && echo "::warning::No changes to commit, skipping!" || echo "$CHANGES to commit, proceeding..."
+          echo "::set-output name=PUSH_STATUS::$([[ $CHANGES > 0 && $(git push --porcelain -u origin ${{ github.event.inputs.branch-name }}) == *"Done"* ]] && echo 'OK' || echo "NOK")"
+
+      - id: pr
+        name: Create PR
+        if: steps.push.outputs.PUSH_STATUS == 'OK'
+        run: |
+          labels=$(echo ${{ github.event.inputs.labels }} | sed -r 's/\s+//g')
+          PR_URL=$(hub pull-request --base ${{ env.default_branch }} --head ${{ github.event.inputs.branch-name }} -l $labels --no-edit --assign ${{ github.actor }}) &&
+          echo "::set-output name=PR_URL::$PR_URL" &&
+          [[ ! -z "$PR_URL" ]] && echo "::notice::PR created: $PR_URL" || echo "::error::Failed to create PR!"
+          echo $PR_URL
