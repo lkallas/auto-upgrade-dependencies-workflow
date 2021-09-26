@@ -17,9 +17,11 @@ You can read about Github actions [here](https://docs.github.com/en/actions).
    5. Job checks out a new feature branch which name is provided by the workflow input.
    6. Job runs `yarn add <dependency names>` to update `package.json` and `yarn.lock` files.
    7. If there are un-committed changes, the job commits with `chore: (auto)upgrade <dependency names>` message and pushes changes to the upstream repository. Does not proceed if change set is empty.
-   8. Job creates pull-request if push step was successful. Sets PR title(same as commit message), labels and assigns the user that started the workflow. You can see the PR URL logged as warning in the workflow summary. 
+   8. Job creates pull-request if push step was successful. Sets PR title(same as commit message), labels and assigns the user that started the workflow. You can see the PR URL logged as warning in the workflow summary.  
+
 
 And this is the finished workflow result:  
+
 ![workflow result](./images/result.jpg)
 
 ## Workflow setup
@@ -52,9 +54,16 @@ The action run prompt will require you to fill in these inputs:
 
 ## Examples
 
-Here you can find few examples how the workflow behaves:
+You can see that there is an [example workflow](./.github/workflows/example.yml) set up in this repository.  
 
-1. [Bla bla](./)
+You are able to see the workflow runs [here](https://github.com/lkallas/auto-upgrade-dependencies-workflow/actions/workflows/example.yml).  
+
+This workflow is targeting two dummy repositories created to illustrate the outcome:  
+
+1. [action-target-one](https://github.com/lkallas/action-target-one)
+2. [action-target-two](https://github.com/lkallas/action-target-two)  
+
+Under pull-requests you'll be able to see the PR-s this example workflow has created.
 
 ## Actions billing
 
