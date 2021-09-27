@@ -1,7 +1,9 @@
 # Automate dependency upgrades with Yarn and Github action
 
-This repository contains a Github action [workflow template](./auto-upgrade-dependencies.yml) that will make upgrading
-your project dependencies as easy as clicking a button.  
+This repository contains a Github action [workflow template](./auto-upgrade-dependencies.yml) that will make creating 
+dependency upgrade pull-requests in multiple Github repositories as easy as clicking a button.  
+
+![workflow result](./images/run_workflow.jpg)  
 
 You can read about Github actions [here](https://docs.github.com/en/actions).
 
@@ -17,7 +19,7 @@ You can read about Github actions [here](https://docs.github.com/en/actions).
    5. Job checks out a new feature branch which name is provided by the workflow input.
    6. Job runs `yarn add <dependency names>` to update `package.json` and `yarn.lock` files.
    7. If there are un-committed changes, the job commits with `chore: (auto)upgrade <dependency names>` message and pushes changes to the upstream repository. Does not proceed if change set is empty.
-   8. Job creates pull-request if push step was successful. Sets PR title(same as commit message), labels and assigns the user that started the workflow. You can see the PR URL logged as warning in the workflow summary.  
+   8. Job creates pull-request if push step was successful. Sets PR title(same as commit message), labels and assigns the user that started the workflow. You can see the PR URL logged in the workflow summary.  
 
 
 And this is the finished workflow result:  
