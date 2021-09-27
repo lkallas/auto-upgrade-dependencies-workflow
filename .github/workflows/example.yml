@@ -62,7 +62,7 @@ jobs:
         name: Check package.json
         if: steps.branch-check.outputs.UPSTREAM_BRANCH_EXISTS != 'true'
         run: |
-          EXISTING_DEPENDENCIES=$(jq -r '[(.dependencies, .devDependencies) | with_entries(select([.key] | inside(${{ github.event.inputs.dependencies-to-update }}))) | keys ] | flatten | join(" ")' package.json) &&
+          EXISTING_DEPENDENCIES=$(jq -r 'select(.dependencies != null) | select(.devDependencies != null) | [(.dependencies, .devDependencies) | with_entries(select([.key] | inside(${{ github.event.inputs.dependencies-to-update }}))) | keys ] | flatten | join(" ")' package.json) &&
           (
               if [[ ! -z "$EXISTING_DEPENDENCIES" ]]; then
 
