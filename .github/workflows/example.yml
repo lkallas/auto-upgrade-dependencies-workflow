@@ -5,11 +5,11 @@ on:
   workflow_dispatch:
     inputs:
       dependencies-to-update:
-        description: 'JSON array string with dependencies to update'
+        description: 'JSON array with dependency names'
         required: true
         default: '["rimraf", "typescript", "node-fetch"]'
       repositories-to-update:
-        description: 'JSON array string with repositories to update'
+        description: 'JSON array with repository names'
         required: true
         default: '["lkallas/action-target-one", "lkallas/action-target-two"]'
       branch-name:
