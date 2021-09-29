@@ -44,6 +44,7 @@ jobs:
       - id: config
         name: NPM token and git config
         run: |
+          echo '${{ toJson(github.event.inputs) }}'
           git config user.name github-actions
           git config user.email github-actions@github.com
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
@@ -54,13 +55,13 @@ jobs:
       - id: branch-check
         name: Check upstream for branch existence
         run: |
-          MATCH=$(curl -s -u ${{ github.actor }}:${{ secrets.GH_TOKEN }} -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/${{ matrix.repositories }}/branches | jq -c '.[] | select(.name == "${{ github.event.inputs.branch-name }}")')
-          [[ ! -z "$MATCH" ]] && echo "::set-output name=UPSTREAM_BRANCH_EXISTS::true" || echo "::set-output name=UPSTREAM_BRANCH_EXISTS::false"
-          [[ ! -z "$MATCH" ]] && echo "::warning::${{ github.event.inputs.branch-name }} branch already exists, skipping!" || echo "Branch ${{ github.event.inputs.branch-name }} does not exist, proceed..."
+          git fetch --all
+          git --no-pager branch -a -vv
+          BRANCH=$(git ls-remote --heads origin refs/heads/${{ github.event.inputs.branch-name }})
+          [[ ! -z "$BRANCH" ]] && { echo "::warning::Branch ${{ github.event.inputs.branch-name }} already exists upstream, aborting!"; exit 1; } || echo "Branch ${{ github.event.inputs.branch-name }} does not exist upstream, proceeding";
 
       - id: package-json
         name: Check package.json
-        if: steps.branch-check.outputs.UPSTREAM_BRANCH_EXISTS != 'true'
         run: |
           EXISTING_DEPENDENCIES=$(jq -r 'select(.dependencies != null) | select(.devDependencies != null) | [(.dependencies, .devDependencies) | with_entries(select([.key] | inside(${{ github.event.inputs.dependencies-to-update }}))) | keys ] | flatten | join(" ")' package.json) &&
           (
@@ -110,21 +111,23 @@ jobs:
           yarn add ${{ steps.package-json.outputs.DEPENDENCIES }} &&
           rm .npmrc
 
+      - id: changes-check
+        name: Check for changes (fail if none)
+        run: |
+          [[ -z $(git status --porcelain) ]] && { echo "::warning::No changes to commit! Aborting!"; exit 1; } || echo "Changes detected, proceeding...";
+
       - id: push
         name: Commit, push upstream
-        if: steps.branch-check.outputs.UPSTREAM_BRANCH_EXISTS != 'true' && steps.package-json.outputs.DEPENDENCIES != ''
         run: |
-          git add . && git commit -m "chore: (auto)upgrade ${{ steps.package-json.outputs.DEPENDENCIES }}" &&
-          CHANGES=$(git diff --name-only ${{ env.default_branch }} ${{ github.event.inputs.branch-name }} | wc -l)
-          [[ $CHANGES == 0 ]] && echo "::warning::No changes to commit, skipping!" || echo "$CHANGES to commit, proceeding..."
-          echo "::set-output name=PUSH_STATUS::$([[ $CHANGES > 0 && $(git push --porcelain -u origin ${{ github.event.inputs.branch-name }}) == *"Done"* ]] && echo 'OK' || echo "NOK")"
+          git add . &&
+          git commit -m "chore: (auto)upgrade ${{ steps.package-json.outputs.DEPENDENCIES }}"
+          [[ $(git push --porcelain -u origin ${{ github.event.inputs.branch-name }}) == *"Done"* ]] && echo "Pushed changes to upstream, proceeding..." || { echo "::error::Failed to push changes to upstream!"; exit 1; }
 
       - id: pr
         name: Create PR
-        if: steps.push.outputs.PUSH_STATUS == 'OK'
         run: |
           labels=$(echo ${{ github.event.inputs.labels }} | sed -r 's/\s+//g')
           PR_URL=$(hub pull-request --base ${{ env.default_branch }} --head ${{ github.event.inputs.branch-name }} -l $labels --no-edit --assign ${{ github.actor }}) &&
-          echo "::set-output name=PR_URL::$PR_URL" &&
-          [[ ! -z "$PR_URL" ]] && echo "::notice::PR created: $PR_URL" || echo "::error::Failed to create PR!"
+          [[ ! -z "$PR_URL" ]] && echo "::notice::PR created: $PR_URL" || { echo "::error::Failed to create PR!"; exit 1; }
+          echo "::set-output name=PR_URL::$PR_URL"
           echo $PR_URL
