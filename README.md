@@ -51,6 +51,7 @@ The action run prompt will require you to fill in these inputs:
 |------------------------|----------|-----------------------------------------------|-----------------------------------------|
 | dependencies-to-update | `true`   | JSON array string with dependencies to update | `["rimraf", "typescript"]`              |
 | repositories-to-update | `true`   | JSON array string with repositories to update | `["org/repo-name", "org/another-repo"]` |
+| dry-run                | `false`  | Run without git push and PR?                  | `true`                                  |
 | branch-name            | `false`  | Branch from which the PR is made              | `auto_upgrade_dependencies`             |
 | labels                 | `false`  | Labels that are attached to pull-request      | `dependencies, actions, bot`            |
 
