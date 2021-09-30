@@ -22,11 +22,43 @@ on:
         default: 'dependencies, actions, bot'
 
 jobs:
+  setup:
+    outputs:
+      yarn-cache-dir: ${{ steps.prerequisites.outputs.yarn_cache_dir }}
+      cache-key: ${{ steps.fill-yarn-cache.outputs.cache_key }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: prerequisites
+        name: Prerequisites
+        run: |
+          echo "::set-output name=yarn_cache_dir::$(yarn cache dir)"
+          echo "::set-output name=dependencies::$(echo '${{ github.event.inputs.dependencies-to-update }}' | sort | jq -r 'join(" ")')"
+
+      - id: fill-yarn-cache
+        name: Fill yarn cache
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc &&
+          echo "yarn add ${{ steps.prerequisites.outputs.dependencies }}" &&
+          yarn add ${{ steps.prerequisites.outputs.dependencies }} && rm .npmrc
+          cache_key="${{ runner.os }}-yarn-cache-$(jq -r '.dependencies | to_entries | sort | [.[][]] | join("_")' package.json | sed "s/[^a-zA-Z0-9]/_/g")"
+          echo "::set-output name=cache_key::$cache_key"
+          echo "CACHE DIR '${{ steps.prerequisites.outputs.yarn_cache_dir }}' CONTENTS: $(ls ${{ steps.prerequisites.outputs.yarn_cache_dir }})"
+
+      - id: cache-setup
+        name: Cache setup
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.prerequisites.outputs.yarn_cache_dir }}
+          key: ${{ steps.fill-yarn-cache.outputs.cache_key }}
+          restore-keys: |
+            ${{ steps.fill-yarn-cache.outputs.cache_key }}
+
   upgrade-dependencies:
     env:
       GITHUB_USER: ${{ github.actor }}
       GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
     runs-on: ubuntu-latest
+    needs: setup
     permissions:
       pull-requests: write
     strategy:
@@ -58,7 +90,7 @@ jobs:
           git fetch --all
           git --no-pager branch -a -vv
           BRANCH=$(git ls-remote --heads origin refs/heads/${{ github.event.inputs.branch-name }})
-          [[ ! -z "$BRANCH" ]] && { echo "::warning::Branch ${{ github.event.inputs.branch-name }} already exists upstream, aborting!"; exit 1; } || echo "Branch ${{ github.event.inputs.branch-name }} does not exist upstream, proceeding";
+          [[ ! -z "$BRANCH" ]] && { echo "::error::Branch ${{ github.event.inputs.branch-name }} already exists upstream, aborting!"; exit 1; } || echo "Branch ${{ github.event.inputs.branch-name }} does not exist upstream, proceeding";
 
       - id: package-json
         name: Check package.json
@@ -70,7 +102,7 @@ jobs:
                   yarn_outdated_output=$(yarn outdated $EXISTING_DEPENDENCIES --json | jq -r 'select(.type=="table") | .data.body');
 
                   if [[ -z "$yarn_outdated_output" ]]; then
-                      echo "::warning::yarn outdated returned empty result - provided dependencies are up-to-date!"
+                      echo "::notice::yarn outdated returned empty result - provided dependencies are up-to-date!"
                   else
                       dependencies='';
                       for dependency_name in $EXISTING_DEPENDENCIES; do
@@ -103,21 +135,32 @@ jobs:
               fi
           )
 
+      - id: access-cache
+        name: Setup cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ needs.setup.outputs.yarn-cache-dir }}
+          key: ${{ needs.setup.outputs.cache-key }}
+          restore-keys: |
+            ${{ needs.setup.outputs.cache-key }}
+
       - id: branch-yarn
         name: Checkout branch and yarn
         if: steps.package-json.outputs.DEPENDENCIES != ''
         run: |
           git checkout -b ${{ github.event.inputs.branch-name }} &&
-          yarn add ${{ steps.package-json.outputs.DEPENDENCIES }} &&
+          yarn add ${{ steps.package-json.outputs.DEPENDENCIES }} --ignore-scripts --prefer-offline &&
           rm .npmrc
 
       - id: changes-check
         name: Check for changes (fail if none)
+        if: steps.branch-yarn.outcome == 'success'
         run: |
-          [[ -z $(git status --porcelain) ]] && { echo "::warning::No changes to commit! Aborting!"; exit 1; } || echo "Changes detected, proceeding...";
+          [[ -z $(git status --porcelain) ]] && { echo "::error::No changes to commit! Aborting!"; exit 1; } || echo "Changes detected, proceeding...";
 
       - id: push
         name: Commit, push upstream
+        if: steps.changes-check.outcome == 'success'
         run: |
           git add . &&
           git commit -m "chore: (auto)upgrade ${{ steps.package-json.outputs.DEPENDENCIES }}"
@@ -125,9 +168,10 @@ jobs:
 
       - id: pr
         name: Create PR
+        if: steps.changes-check.push == 'success'
         run: |
           labels=$(echo ${{ github.event.inputs.labels }} | sed -r 's/\s+//g')
           PR_URL=$(hub pull-request --base ${{ env.default_branch }} --head ${{ github.event.inputs.branch-name }} -l $labels --no-edit --assign ${{ github.actor }}) &&
-          [[ ! -z "$PR_URL" ]] && echo "::notice::PR created: $PR_URL" || { echo "::error::Failed to create PR!"; exit 1; }
+          [[ ! -z "$PR_URL" ]] && echo "::warning::PR created: $PR_URL" || { echo "::error::Failed to create PR!"; exit 1; }
           echo "::set-output name=PR_URL::$PR_URL"
           echo $PR_URL
