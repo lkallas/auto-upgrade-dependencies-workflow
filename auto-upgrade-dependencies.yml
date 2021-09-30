@@ -103,7 +103,7 @@ jobs:
           (
               if [[ -n "$EXISTING_DEPENDENCIES" ]]; then
 
-                  yarn_outdated_output="$(yarn outdated "$EXISTING_DEPENDENCIES" --json | jq -r 'select(.type=="table") | .data.body')";
+                  yarn_outdated_output=$(yarn outdated $EXISTING_DEPENDENCIES --json | jq -r 'select(.type=="table") | .data.body');
 
                   if [[ -z "$yarn_outdated_output" ]]; then
                       echo "::notice::yarn outdated returned empty result - provided dependencies are up-to-date!";
