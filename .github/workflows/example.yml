@@ -42,8 +42,8 @@ jobs:
         name: Fill yarn cache
         run: |
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc &&
-          echo "yarn add ${{ steps.prerequisites.outputs.dependencies }}" &&
-          yarn add ${{ steps.prerequisites.outputs.dependencies }} && rm .npmrc
+          echo "yarn add ${{ steps.prerequisites.outputs.dependencies }} --ignore-scripts" &&
+          yarn add ${{ steps.prerequisites.outputs.dependencies }} --ignore-scripts && rm .npmrc
           cache_key="${{ runner.os }}-yarn-cache-$(jq -r '.dependencies | to_entries | sort | [.[][]] | join("_")' package.json | sed "s/[^a-zA-Z0-9]/_/g")"
           echo "::set-output name=cache_key::$cache_key"
           echo "CACHE DIR '${{ steps.prerequisites.outputs.yarn_cache_dir }}' CONTENTS: $(ls ${{ steps.prerequisites.outputs.yarn_cache_dir }})"
@@ -101,38 +101,37 @@ jobs:
         run: |
           EXISTING_DEPENDENCIES=$(jq -r 'select(.dependencies != null) | select(.devDependencies != null) | [(.dependencies, .devDependencies) | with_entries(select([.key] | inside(${{ github.event.inputs.dependencies-to-update }}))) | keys ] | flatten | join(" ")' package.json) &&
           (
-              if [[ ! -z "$EXISTING_DEPENDENCIES" ]]; then
+              if [[ -n "$EXISTING_DEPENDENCIES" ]]; then
 
-                  yarn_outdated_output=$(yarn outdated $EXISTING_DEPENDENCIES --json | jq -r 'select(.type=="table") | .data.body');
+                  yarn_outdated_output="$(yarn outdated "$EXISTING_DEPENDENCIES" --json | jq -r 'select(.type=="table") | .data.body')";
 
                   if [[ -z "$yarn_outdated_output" ]]; then
-                      echo "::notice::yarn outdated returned empty result - provided dependencies are up-to-date!"
+                      echo "::notice::yarn outdated returned empty result - provided dependencies are up-to-date!";
                   else
                       dependencies='';
                       for dependency_name in $EXISTING_DEPENDENCIES; do
 
-                          dependency_version_details=$(echo ${yarn_outdated_output} | jq -r '.[] | select(contains(["'$dependency_name'"]))');
+                          dependency_version_details="$(echo "$yarn_outdated_output" | jq -r '.[] | select(contains(["'"$dependency_name"'"]))')";
+                          current_version=$(echo "$dependency_version_details" | jq -r '.[1]');
+                          latest_version=$(echo "$dependency_version_details" | jq -r '.[3]');
 
-                          current_version=$(echo ${dependency_version_details} | jq -r .[1]);
-                          latest_version=$(echo ${dependency_version_details} | jq -r .[3]);
+                          if [ -n "$current_version" ]; then
 
+                              echo Current "$dependency_name" version: "$current_version";
+                              echo Latest "$dependency_name" version: "$latest_version";
 
-                          if [ ! -z "$current_version" ]; then
-
-                              echo Current $dependency_name version: $current_version;
-                              echo Latest $dependency_name version: $latest_version;
-
-                              if [ $current_version != $latest_version ]; then
-                                  echo $dependency_name is outdated!;
+                              if [ "$current_version" != "$latest_version" ]; then
+                                  echo "$dependency_name" is outdated!;
                                   dependencies+=" ${dependency_name}";
                               fi
 
                           else
-                              echo $dependency_name is up-to-date, skipping...;
+                              echo "$dependency_name" is up-to-date, skipping...;
                           fi
                       done
+
                       echo "::set-output name=DEPENDENCIES::$dependencies"
-                      echo Preparing to upgrade $dependencies
+                      echo Preparing to upgrade "$dependencies"
                   fi
               else
                   echo No matching dependencies found in package.json!;
@@ -141,6 +140,7 @@ jobs:
 
       - id: access-cache
         name: Setup cache
+        if: steps.package-json.outputs.DEPENDENCIES != ''
         uses: actions/cache@v2
         with:
           path: ${{ needs.setup.outputs.yarn-cache-dir }}
