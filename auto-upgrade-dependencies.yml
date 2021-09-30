@@ -12,6 +12,10 @@ on:
         description: 'JSON array with repository names'
         required: true
         default: '["org/repo-name", "org/another-repo"]'
+      dry-run:
+        description: 'Dry run w/o git push and PR (true|false)?'
+        required: false
+        default: 'true'
       branch-name:
         description: 'Branch from which the PR is made'
         required: false
@@ -158,9 +162,14 @@ jobs:
         run: |
           [[ -z $(git status --porcelain) ]] && { echo "::error::No changes to commit! Aborting!"; exit 1; } || echo "Changes detected, proceeding...";
 
+      - id: dry-run
+        name: Dry-run announcement
+        if: steps.changes-check.outcome == 'success' && github.event.inputs.dry-run == 'true'
+        run: echo "::warning::Workflow started as dry-run. Not pushing to upstream and skipping PR creation!"
+
       - id: push
         name: Commit, push upstream
-        if: steps.changes-check.outcome == 'success'
+        if: steps.changes-check.outcome == 'success' && github.event.inputs.dry-run != 'true'
         run: |
           git add . &&
           git commit -m "chore: (auto)upgrade ${{ steps.package-json.outputs.DEPENDENCIES }}"
@@ -168,7 +177,7 @@ jobs:
 
       - id: pr
         name: Create PR
-        if: steps.changes-check.push == 'success'
+        if: steps.changes-check.push == 'success' && github.event.inputs.dry-run != 'true'
         run: |
           labels=$(echo ${{ github.event.inputs.labels }} | sed -r 's/\s+//g')
           PR_URL=$(hub pull-request --base ${{ env.default_branch }} --head ${{ github.event.inputs.branch-name }} -l $labels --no-edit --assign ${{ github.actor }}) &&
