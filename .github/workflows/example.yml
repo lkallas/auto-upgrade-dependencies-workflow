@@ -103,7 +103,7 @@ jobs:
           (
               if [[ -n "$EXISTING_DEPENDENCIES" ]]; then
 
-                  yarn_outdated_output=$(yarn outdated $EXISTING_DEPENDENCIES --json | jq -r 'select(.type=="table") | .data.body');
+                  yarn_outdated_output=$(yarn outdated $EXISTING_DEPENDENCIES --json | jq -c 'select(.type=="table") | .data.body');
 
                   if [[ -z "$yarn_outdated_output" ]]; then
                       echo "::notice::yarn outdated returned empty result - provided dependencies are up-to-date!";
@@ -111,7 +111,7 @@ jobs:
                       dependencies='';
                       for dependency_name in $EXISTING_DEPENDENCIES; do
 
-                          dependency_version_details="$(echo "$yarn_outdated_output" | jq -r '.[] | select(contains(["'"$dependency_name"'"]))')";
+                          dependency_version_details=$(echo "$yarn_outdated_output" | jq -r '.[] | select(contains(["'"$dependency_name"'"]))');
                           current_version=$(echo "$dependency_version_details" | jq -r '.[1]');
                           latest_version=$(echo "$dependency_version_details" | jq -r '.[3]');
 
@@ -122,7 +122,7 @@ jobs:
 
                               if [ "$current_version" != "$latest_version" ]; then
                                   echo "$dependency_name" is outdated!;
-                                  dependencies+=" ${dependency_name}";
+                                  dependencies+="${dependency_name} ";
                               fi
 
                           else
