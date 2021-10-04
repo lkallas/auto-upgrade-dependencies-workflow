@@ -25,7 +25,7 @@ on:
         required: false
         default: 'dependencies, actions, bot'
 
-jobs:
+jjobs:
   setup:
     outputs:
       yarn-cache-dir: ${{ steps.prerequisites.outputs.yarn_cache_dir }}
@@ -55,7 +55,7 @@ jobs:
           path: ${{ steps.prerequisites.outputs.yarn_cache_dir }}
           key: ${{ steps.fill-yarn-cache.outputs.cache_key }}
           restore-keys: |
-            ${{ steps.fill-yarn-cache.outputs.cache_key }}
+            ${{ runner.os }}-yarn-cache-
 
   upgrade-dependencies:
     env:
@@ -146,7 +146,7 @@ jobs:
           path: ${{ needs.setup.outputs.yarn-cache-dir }}
           key: ${{ needs.setup.outputs.cache-key }}
           restore-keys: |
-            ${{ needs.setup.outputs.cache-key }}
+            ${{ runner.os }}-yarn-cache-
 
       - id: branch-yarn
         name: Checkout branch and yarn
@@ -177,7 +177,7 @@ jobs:
 
       - id: pr
         name: Create PR
-        if: steps.changes-check.push == 'success' && github.event.inputs.dry-run != 'true'
+        if: steps.push.outcome == 'success' && github.event.inputs.dry-run != 'true'
         run: |
           labels=$(echo ${{ github.event.inputs.labels }} | sed -r 's/\s+//g')
           PR_URL=$(hub pull-request --base ${{ env.default_branch }} --head ${{ github.event.inputs.branch-name }} -l $labels --no-edit --assign ${{ github.actor }}) &&
